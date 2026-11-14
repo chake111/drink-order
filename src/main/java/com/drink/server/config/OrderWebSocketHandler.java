@@ -13,6 +13,7 @@ import org.springframework.web.socket.handler.TextWebSocketHandler;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * 订单 WebSocket 处理器：维护管理端连接并向其推送待接单数。
@@ -36,13 +37,13 @@ public class OrderWebSocketHandler extends TextWebSocketHandler {
     /** 单连接待发送缓冲上限 */
     private static final int SEND_BUFFER_LIMIT_BYTES = 512 * 1024;
 
-    /** 心跳周期 */
-    private static final long HEARTBEAT_INTERVAL_MS = 30_000L;
-
-    /** 空闲判定：连续两个心跳周期没有任何入站消息（Pong 也算）即清理 */
+    /** 空闲判定：连续两个心跳周期（默认 30s×3）没有任何入站消息（Pong 也算）即清理 */
     private static final long IDLE_TIMEOUT_MS = 90_000L;
 
     private final Map<String, SessionMeta> sessions = new ConcurrentHashMap<>();
+
+    /** 收到的 Pong 累计数：探针测试用它证明「服务端 Ping 确实得到客户端 Pong」 */
+    private final AtomicLong pongCount = new AtomicLong();
 
     @Override
     public void afterConnectionEstablished(WebSocketSession session) {
@@ -71,6 +72,7 @@ public class OrderWebSocketHandler extends TextWebSocketHandler {
     @Override
     protected void handlePongMessage(WebSocketSession session, PongMessage message) {
         touch(session.getId());
+        pongCount.incrementAndGet();
     }
 
     @Override
@@ -95,7 +97,7 @@ public class OrderWebSocketHandler extends TextWebSocketHandler {
     /**
      * 心跳：发 Ping 探活，顺带清理长时间无入站消息的连接
      */
-    @Scheduled(fixedDelay = HEARTBEAT_INTERVAL_MS)
+    @Scheduled(fixedDelayString = "${drink.ws.heartbeat-interval-ms:30000}")
     public void heartbeat() {
         if (sessions.isEmpty()) {
             return;
@@ -122,6 +124,11 @@ public class OrderWebSocketHandler extends TextWebSocketHandler {
     /** 当前连接数，供测试与监控使用 */
     public int sessionCount() {
         return sessions.size();
+    }
+
+    /** 累计收到的 Pong 数，供心跳探针测试断言 */
+    public long pongCount() {
+        return pongCount.get();
     }
 
     private void touch(String sessionId) {
