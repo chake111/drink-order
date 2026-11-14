@@ -271,7 +271,11 @@ public class OrderServiceImpl implements OrderService {
      *
      * <p>提交前广播会让管理端看到尚未落库的状态（客户端立即回查可能扑空），
      * 因此有事务上下文时统一挂到 {@code afterCommit}；无事务上下文（confirm/reject/cancel）
-     * 直接执行——这些路径单条 UPDATE 已是隐式提交。
+     * 直接执行——这些路径单条 CAS UPDATE 本身就是原子的隐式提交。
+     *
+     * <p>这三条路径**故意不加** {@code @Transactional}：CAS 已保证并发下只有一次能改到行、
+     * 只有赢家扣减；而「UPDATE 提交后、内存扣减前 JVM 崩溃」这一窗口，加事务只是把扣减挪到
+     * afterCommit，窗口依旧存在，反而多一个事务边界。该窗口由 60s 校准回源 DB 兜底修正。
      *
      * @param delta 待接单数增量：下单 +1，接单/拒单/取消 -1
      */

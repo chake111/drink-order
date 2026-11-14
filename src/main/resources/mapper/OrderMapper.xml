@@ -47,16 +47,8 @@
         VALUES (#{userId}, #{orderNo}, #{amount}, #{status}, #{pickupType}, #{pickupNo})
     </insert>
 
-    <update id="updateStatus">
-        UPDATE `order` SET status = #{status} WHERE id = #{id}
-    </update>
-
     <update id="updateStatusIfMatch">
         UPDATE `order` SET status = #{status} WHERE id = #{id} AND status = #{expected}
-    </update>
-
-    <update id="reject">
-        UPDATE `order` SET status = #{status}, reject_reason = #{rejectReason} WHERE id = #{id}
     </update>
 
     <update id="rejectIfMatch">
