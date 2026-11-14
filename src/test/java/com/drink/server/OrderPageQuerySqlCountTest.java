@@ -199,6 +199,83 @@ class OrderPageQuerySqlCountTest {
                 "缺少批量明细查询 listByOrderIds");
     }
 
+    /**
+     * 历史恰好 500 单时：分段 IN 恰好 1 批（每批 ≤500），SQL 总数仍为 2，未退化为 N+1。
+     * 使用无历史订单的独立 userId，保证「500 单」是精确值。
+     */
+    @Test
+    void userOrderListWith500OrdersStillTwoStatements() {
+        long isolatedUser = 990001L;
+        seedOrdersDirectly(isolatedUser, 500);
+        counter.reset();
+
+        long t0 = System.nanoTime();
+        var orders = orderService.listByUserId(isolatedUser, null);
+        long costMs = (System.nanoTime() - t0) / 1_000_000;
+
+        List<String> ids = counter.ids().stream()
+                .map(id -> id.substring(id.lastIndexOf('.') + 1))
+                .collect(Collectors.toList());
+        System.out.println("T3 恰好500单: SQL 次数=" + counter.count() + ", statements=" + ids
+                + ", orders=" + orders.size() + ", costMs=" + costMs);
+
+        assertEquals(500, orders.size(), "返回订单数应为 500");
+        assertEquals(2, counter.count(), "500 单场景 SQL 条数不符: " + ids);
+        assertEquals(0, ids.stream().filter("listByOrderId"::equals).count(), "出现逐单查询");
+        assertEquals(1, ids.stream().filter("listByOrderIds"::equals).count(), "明细批次数不为 1");
+    }
+
+    /**
+     * 501 单时跨到第 2 批：SQL 变为 3 条，证明分段边界行为符合 ceil(N/500)
+     */
+    @Test
+    void userOrderListWith501OrdersUsesTwoBatches() {
+        long isolatedUser = 990002L;
+        seedOrdersDirectly(isolatedUser, 501);
+        counter.reset();
+
+        var orders = orderService.listByUserId(isolatedUser, null);
+
+        List<String> ids = counter.ids().stream()
+                .map(id -> id.substring(id.lastIndexOf('.') + 1))
+                .collect(Collectors.toList());
+        System.out.println("T3 501单: SQL 次数=" + counter.count() + ", statements=" + ids
+                + ", orders=" + orders.size());
+
+        assertEquals(501, orders.size(), "返回订单数应为 501");
+        assertEquals(3, counter.count(), "501 单场景应为 2 个明细批次（共 3 条 SQL）: " + ids);
+        assertEquals(2, ids.stream().filter("listByOrderIds"::equals).count(), "明细批次数不为 2");
+    }
+
+    /**
+     * 直接批量插入订单与明细，避免通过 submit 造 500 单过慢
+     */
+    private void seedOrdersDirectly(long userId, int count) {
+        List<Object[]> orderRows = new java.util.ArrayList<>(count);
+        for (int i = 0; i < count; i++) {
+            orderRows.add(new Object[]{
+                    userId, "T3BULK" + System.nanoTime() + i, new java.math.BigDecimal("12.00"), 4, "自取", null
+            });
+        }
+        jdbcTemplate.batchUpdate(
+                "INSERT INTO `order` (user_id, order_no, amount, status, pickup_type, pickup_no) VALUES (?,?,?,?,?,?)",
+                orderRows);
+
+        List<Long> newIds = jdbcTemplate.queryForList(
+                "SELECT id FROM `order` WHERE id > ? AND user_id = ? ORDER BY id", Long.class, maxOrderIdBefore, userId);
+        List<Object[]> detailRows = new java.util.ArrayList<>(count);
+        for (Long id : newIds) {
+            detailRows.add(new Object[]{id, 1L, "美式", "/images/ame.png", "", 1, new java.math.BigDecimal("12.00")});
+        }
+        jdbcTemplate.batchUpdate(
+                "INSERT INTO order_detail (order_id, drink_id, drink_name, image, spec, quantity, price) VALUES (?,?,?,?,?,?,?)",
+                detailRows);
+    }
+
+    private void seedOrdersDirectly(int count) {
+        seedOrdersDirectly(USER_ID, count);
+    }
+
     private void seedOrders(int count) {
         for (int i = 0; i < count; i++) {
             OrderSubmitDTO.OrderItem item = new OrderSubmitDTO.OrderItem();

@@ -46,6 +46,9 @@ public class OrderServiceImpl implements OrderService {
     /** 幂等键存活时间（秒）：覆盖用户连点与客户端重试窗口 */
     private static final long IDEM_TTL_SECONDS = 3;
 
+    /** 明细 IN 查询的分段大小：每批最多 500 个 orderId */
+    private static final int DETAIL_BATCH_SIZE = 500;
+
     /** Redis 不可用时的降级后缀：随机种子 + JVM 内单调自增（单实例内唯一，多实例靠 uk_order_no 兜底） */
     private static final AtomicLong FALLBACK_SEQ =
             new AtomicLong(ThreadLocalRandom.current().nextInt(1_000_000));
@@ -79,7 +82,8 @@ public class OrderServiceImpl implements OrderService {
     }
 
     /**
-     * 批量装配订单明细：一次 IN 查询后按 orderId 内存分组，避免逐单查询
+     * 批量装配订单明细：按 orderId 分段 IN 查询（每批 ≤500）后内存分组，避免逐单查询
+     * 与单条 IN 列表过长导致的包体/解析压力
      */
     private void fillDetails(List<Order> orders) {
         if (orders == null || orders.isEmpty()) {
@@ -90,8 +94,11 @@ public class OrderServiceImpl implements OrderService {
             orderIds.add(order.getId());
         }
         Map<Long, List<OrderDetail>> grouped = new HashMap<>();
-        for (OrderDetail detail : orderDetailMapper.listByOrderIds(orderIds)) {
-            grouped.computeIfAbsent(detail.getOrderId(), k -> new ArrayList<>()).add(detail);
+        for (int from = 0; from < orderIds.size(); from += DETAIL_BATCH_SIZE) {
+            int to = Math.min(from + DETAIL_BATCH_SIZE, orderIds.size());
+            for (OrderDetail detail : orderDetailMapper.listByOrderIds(orderIds.subList(from, to))) {
+                grouped.computeIfAbsent(detail.getOrderId(), k -> new ArrayList<>()).add(detail);
+            }
         }
         for (Order order : orders) {
             order.setDetails(grouped.getOrDefault(order.getId(), new ArrayList<>()));
