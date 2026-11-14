@@ -1,5 +1,6 @@
 # drink-server 一键起服务：MySQL + Redis + 应用
-# 注意：未在本机验证（开发机无 Docker）。首次执行会跑两个 initdb 脚本：建表 + 补 T3 索引。
+# 已验证（2026-11-14，Docker 29.9.3 / Compose v5.7.0）：build 通过、三容器 healthy、
+# initdb 建表+索引生效、下单/幂等/待接单数接口通。
 
 services:
   mysql:

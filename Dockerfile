@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 # 多阶段构建：构建阶段带 Maven + JDK，运行阶段只留 JRE，镜像更小且不带构建工具
-# 注意：本文件与 docker-compose.yml 均未在本机做过运行验证（开发机无 Docker），见交接文档 T5
+# 注意：已验证（2026-11-14，Docker 29.9.3）：构建成功、镜像内以 uid=999(app) 运行、mvn 未泄漏到运行镜像
 
 # ---------- 构建阶段 ----------
 FROM maven:3.9-eclipse-temurin-17 AS build
