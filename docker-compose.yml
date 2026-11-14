@@ -1,0 +1,71 @@
+# drink-server 一键起服务：MySQL + Redis + 应用
+# 注意：未在本机验证（开发机无 Docker）。首次执行会跑两个 initdb 脚本：建表 + 补 T3 索引。
+
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: drink-mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-123456}
+      MYSQL_DATABASE: drink_order
+      TZ: Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+      - --default-time-zone=+08:00
+    volumes:
+      - mysql-data:/var/lib/mysql
+      # 只在数据卷为空（首次启动）时按文件名顺序执行
+      - ./drink_order.sql:/docker-entrypoint-initdb.d/01-drink_order.sql:ro
+      - ./db/order_index.sql:/docker-entrypoint-initdb.d/02-order_index.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+
+  redis:
+    image: redis:7-alpine
+    container_name: drink-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 12
+      start_period: 10s
+
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: drink-app
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      # 全部走环境变量覆盖，application.yml 零改动
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/drink_order?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf-8&allowPublicKeyRetrieval=true
+      SPRING_DATASOURCE_USERNAME: root
+      SPRING_DATASOURCE_PASSWORD: ${MYSQL_ROOT_PASSWORD:-123456}
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: "6379"
+      DRINK_UPLOAD_PATH: /app/upload/
+      JWT_SECRET: ${JWT_SECRET:-drink_order_secret_key_2026}
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    volumes:
+      - upload-data:/app/upload
+
+volumes:
+  mysql-data:
+  redis-data:
+  upload-data:
