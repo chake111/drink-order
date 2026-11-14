@@ -2,8 +2,10 @@ package com.drink.server.common;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Component;
 
+import java.util.Collections;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -14,6 +16,14 @@ import java.util.concurrent.TimeUnit;
 public class RedisUtil {
 
     private final StringRedisTemplate redisTemplate;
+
+    /**
+     * INCR 与 EXPIRE 原子执行：仅首次自增时设置过期，避免进程中途退出留下永不过期的 key
+     */
+    private static final DefaultRedisScript<Long> INCR_WITH_TTL = new DefaultRedisScript<>(
+            "local v = redis.call('INCR', KEYS[1])\n" +
+                    "if v == 1 then redis.call('EXPIRE', KEYS[1], ARGV[1]) end\n" +
+                    "return v", Long.class);
 
     public RedisUtil(StringRedisTemplate redisTemplate) {
         this.redisTemplate = redisTemplate;
@@ -52,5 +62,16 @@ public class RedisUtil {
      */
     public Boolean hasKey(String key) {
         return redisTemplate.hasKey(key);
+    }
+
+    /**
+     * 原子自增并设置过期时间（仅首次自增时设置，后续不重置 TTL）
+     *
+     * @return 自增后的值；脚本返回空时为 0
+     */
+    public long incrementWithTtl(String key, long timeout, TimeUnit unit) {
+        Long value = redisTemplate.execute(INCR_WITH_TTL,
+                Collections.singletonList(key), String.valueOf(unit.toSeconds(timeout)));
+        return value == null ? 0L : value;
     }
 }
