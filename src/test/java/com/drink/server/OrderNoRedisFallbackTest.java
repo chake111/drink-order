@@ -111,7 +111,7 @@ class OrderNoRedisFallbackTest {
     void submitSucceedsWhenRedisUnavailable() throws Exception {
         OrderServiceImpl service = fallbackService();
 
-        Map<String, Object> single = service.submit(USER_ID, buildDto());
+        Map<String, Object> single = service.submit(USER_ID, buildDto("single"));
         String singleOrderNo = String.valueOf(single.get("orderNo"));
         System.out.println("T1 降级单测结果: orderNo=" + singleOrderNo + ", length=" + singleOrderNo.length());
 
@@ -125,10 +125,11 @@ class OrderNoRedisFallbackTest {
         List<Future<Boolean>> futures = new ArrayList<>();
         try {
             for (int i = 0; i < threads; i++) {
+                final int tag = i;
                 futures.add(pool.submit(() -> {
                     ready.countDown();
                     start.await();
-                    service.submit(USER_ID, buildDto());
+                    service.submit(USER_ID, buildDto("c" + tag));
                     return Boolean.TRUE;
                 }));
             }
@@ -186,7 +187,7 @@ class OrderNoRedisFallbackTest {
         OrderServiceImpl service = new OrderServiceImpl(
                 spyMapper, orderDetailMapper, drinkMapper, webSocketHandler, new RedisUtil(redisTemplate));
 
-        Map<String, Object> result = service.submit(USER_ID, buildDto());
+        Map<String, Object> result = service.submit(USER_ID, buildDto("retryOnce"));
         String orderNo = String.valueOf(result.get("orderNo"));
         System.out.println("T1 冲突重试结果: orderNo=" + orderNo);
 
@@ -208,7 +209,7 @@ class OrderNoRedisFallbackTest {
         OrderServiceImpl service = new OrderServiceImpl(
                 spyMapper, orderDetailMapper, drinkMapper, webSocketHandler, new RedisUtil(redisTemplate));
 
-        BusinessException ex = assertThrows(BusinessException.class, () -> service.submit(USER_ID, buildDto()));
+        BusinessException ex = assertThrows(BusinessException.class, () -> service.submit(USER_ID, buildDto("retryTwice")));
         System.out.println("T1 二次冲突结果: message=" + ex.getMessage());
         assertEquals("下单失败，请重试", ex.getMessage());
     }
@@ -221,12 +222,12 @@ class OrderNoRedisFallbackTest {
         OrderServiceImpl service = new OrderServiceImpl(
                 orderMapper, orderDetailMapper, drinkMapper, webSocketHandler, new RedisUtil(redisTemplate));
 
-        service.submit(USER_ID, buildDto());
+        service.submit(USER_ID, buildDto("rtWarmup"));
         int rounds = 20;
         long[] costs = new long[rounds];
         for (int i = 0; i < rounds; i++) {
             long t0 = System.nanoTime();
-            service.submit(USER_ID, buildDto());
+            service.submit(USER_ID, buildDto("rt" + i));
             costs[i] = (System.nanoTime() - t0) / 1_000_000;
         }
         long max = 0;
@@ -240,10 +241,10 @@ class OrderNoRedisFallbackTest {
                 + ", avgMs=" + (sum / rounds) + ", maxMs=" + max);
     }
 
-    private OrderSubmitDTO buildDto() {
+    private OrderSubmitDTO buildDto(String tag) {
         OrderSubmitDTO.OrderItem item = new OrderSubmitDTO.OrderItem();
         item.setDrinkId(1L);
-        item.setSpec("半糖/冰");
+        item.setSpec("半糖/冰#" + tag);
         item.setQuantity(1);
         OrderSubmitDTO dto = new OrderSubmitDTO();
         dto.setPickupType("自取");

@@ -74,4 +74,13 @@ public class RedisUtil {
                 Collections.singletonList(key), String.valueOf(unit.toSeconds(timeout)));
         return value == null ? 0L : value;
     }
+
+    /**
+     * 键不存在时写入（SETNX + 过期时间），用于幂等键
+     *
+     * @return true 表示本次写入成功（首次请求）
+     */
+    public Boolean setIfAbsent(String key, String value, long timeout, TimeUnit unit) {
+        return redisTemplate.opsForValue().setIfAbsent(key, value, timeout, unit);
+    }
 }

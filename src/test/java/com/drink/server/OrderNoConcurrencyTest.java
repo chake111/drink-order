@@ -81,11 +81,13 @@ class OrderNoConcurrencyTest {
         List<Future<Boolean>> futures = new ArrayList<>();
         try {
             for (int i = 0; i < THREADS; i++) {
+                final int tag = i;
                 futures.add(pool.submit(() -> {
                     ready.countDown();
                     start.await();
                     long t0 = System.nanoTime();
-                    orderService.submit(USER_ID, buildDto());
+                    // 每个请求用不同规格，避免被 T2 的 3s 幂等键拦成同一笔订单
+                    orderService.submit(USER_ID, buildDto(tag));
                     costs.add((System.nanoTime() - t0) / 1_000_000);
                     return Boolean.TRUE;
                 }));
@@ -139,10 +141,10 @@ class OrderNoConcurrencyTest {
         assertTrue(maxPickupNoLen <= 8, "取餐号超长: " + maxPickupNoLen);
     }
 
-    private OrderSubmitDTO buildDto() {
+    private OrderSubmitDTO buildDto(int tag) {
         OrderSubmitDTO.OrderItem item = new OrderSubmitDTO.OrderItem();
         item.setDrinkId(1L);
-        item.setSpec("半糖/冰");
+        item.setSpec("半糖/冰#" + tag);
         item.setQuantity(1);
         OrderSubmitDTO dto = new OrderSubmitDTO();
         dto.setPickupType("自取");

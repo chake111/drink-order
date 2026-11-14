@@ -19,10 +19,13 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -39,6 +42,9 @@ public class OrderServiceImpl implements OrderService {
 
     /** 序列 key 过期时间（小时）：2 天，防止 key 无限增长 */
     private static final long ORDER_SEQ_TTL_HOURS = 48;
+
+    /** 幂等键存活时间（秒）：覆盖用户连点与客户端重试窗口 */
+    private static final long IDEM_TTL_SECONDS = 3;
 
     /** Redis 不可用时的降级后缀：随机种子 + JVM 内单调自增（单实例内唯一，多实例靠 uk_order_no 兜底） */
     private static final AtomicLong FALLBACK_SEQ =
@@ -129,6 +135,23 @@ public class OrderServiceImpl implements OrderService {
             throw new BusinessException("购物车不能为空");
         }
 
+        // 幂等：同一用户 + 同一购物车指纹在 3s 内只放行一次，拦截连点与客户端重试
+        String idemKey = buildIdemKey(userId, dto);
+        if (!acquireIdemKey(idemKey)) {
+            throw new BusinessException("订单已提交，请稍候");
+        }
+        try {
+            return doSubmit(userId, dto);
+        } catch (RuntimeException e) {
+            releaseIdemKey(idemKey);
+            throw e;
+        }
+    }
+
+    /**
+     * 下单主体：校验饮品、重算金额、生成订单号与取餐号、落库主表与明细
+     */
+    private Map<String, Object> doSubmit(Long userId, OrderSubmitDTO dto) {
         // 计算金额并构建明细
         BigDecimal totalAmount = BigDecimal.ZERO;
         List<OrderDetail> details = new ArrayList<>();
@@ -253,6 +276,66 @@ public class OrderServiceImpl implements OrderService {
             return String.format("%03d", seq);
         }
         return orderNo.substring(orderNo.length() - 3);
+    }
+
+    /**
+     * 构造幂等键：idem:order:{userId}:{sha256}
+     * 指纹按 (drinkId, spec, quantity) 排序后摘要，避免 items 顺序抖动导致幂等失效
+     */
+    private String buildIdemKey(Long userId, OrderSubmitDTO dto) {
+        List<OrderSubmitDTO.OrderItem> sorted = new ArrayList<>(dto.getItems());
+        sorted.sort(Comparator
+                .comparing(OrderSubmitDTO.OrderItem::getDrinkId, Comparator.nullsFirst(Comparator.naturalOrder()))
+                .thenComparing(OrderSubmitDTO.OrderItem::getSpec, Comparator.nullsFirst(Comparator.naturalOrder()))
+                .thenComparing(OrderSubmitDTO.OrderItem::getQuantity, Comparator.nullsFirst(Comparator.naturalOrder())));
+
+        StringBuilder sb = new StringBuilder();
+        for (OrderSubmitDTO.OrderItem item : sorted) {
+            sb.append(item.getDrinkId()).append('|')
+                    .append(item.getSpec() == null ? "" : item.getSpec()).append('|')
+                    .append(item.getQuantity()).append(';');
+        }
+        return "idem:order:" + userId + ":" + sha256Hex(sb.toString());
+    }
+
+    private String sha256Hex(String value) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(value.getBytes(StandardCharsets.UTF_8));
+            StringBuilder hex = new StringBuilder(digest.length * 2);
+            for (byte b : digest) {
+                hex.append(Character.forDigit((b >> 4) & 0xF, 16));
+                hex.append(Character.forDigit(b & 0xF, 16));
+            }
+            return hex.toString();
+        } catch (Exception e) {
+            throw new BusinessException("下单失败，请重试");
+        }
+    }
+
+    /**
+     * 抢占幂等键。Redis 不可用时放行（fail-open）：可用性优先于幂等，
+     * 此时仅剩 uk_order_no 兜底，与改造前的风险水平一致。
+     */
+    private boolean acquireIdemKey(String idemKey) {
+        try {
+            Boolean first = redisUtil.setIfAbsent(idemKey, "1", IDEM_TTL_SECONDS, TimeUnit.SECONDS);
+            return !Boolean.FALSE.equals(first);
+        } catch (Exception e) {
+            log.warn("幂等键写入失败，本次放行: key={}, cause={}", idemKey, e.getMessage());
+            return true;
+        }
+    }
+
+    /**
+     * 业务失败时释放幂等键，避免用户被自己的一次失败请求阻塞 3s
+     */
+    private void releaseIdemKey(String idemKey) {
+        try {
+            redisUtil.delete(idemKey);
+        } catch (Exception e) {
+            log.warn("幂等键释放失败，等待 TTL 自然过期: key={}, cause={}", idemKey, e.getMessage());
+        }
     }
 
     /**
