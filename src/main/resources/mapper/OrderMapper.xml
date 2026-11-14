@@ -74,7 +74,8 @@
             IFNULL(SUM(CASE WHEN status = 2 THEN 1 ELSE 0 END), 0) AS makingOrders,
             IFNULL(SUM(CASE WHEN status = 4 THEN 1 ELSE 0 END), 0) AS completedOrders
         FROM `order`
-        WHERE DATE(create_time) = CURDATE()
+        WHERE create_time >= CURDATE()
+          AND create_time &lt; CURDATE() + INTERVAL 1 DAY
           AND status != 5
     </select>
 
@@ -85,7 +86,8 @@
             IFNULL(SUM(CASE WHEN status = 1 THEN 1 ELSE 0 END), 0) AS pendingOrders,
             IFNULL(SUM(CASE WHEN status = 4 THEN 1 ELSE 0 END), 0) AS completedOrders
         FROM `order`
-        WHERE DATE(create_time) = DATE_SUB(CURDATE(), INTERVAL 1 DAY)
+        WHERE create_time >= CURDATE() - INTERVAL 1 DAY
+          AND create_time &lt; CURDATE()
           AND status != 5
     </select>
 
@@ -96,6 +98,7 @@
             COUNT(*) AS count
         FROM `order`
         WHERE create_time >= DATE_SUB(CURDATE(), INTERVAL 7 DAY)
+          AND create_time &lt; CURDATE() + INTERVAL 1 DAY
           AND status != 5
         GROUP BY DATE_FORMAT(create_time, '%m-%d')
         ORDER BY date ASC

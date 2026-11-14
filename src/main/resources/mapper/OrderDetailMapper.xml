@@ -9,6 +9,16 @@
         WHERE order_id = #{orderId}
     </select>
 
+    <select id="listByOrderIds" resultType="com.drink.server.entity.OrderDetail">
+        SELECT id, order_id, drink_id, drink_name, image, spec, quantity, price
+        FROM order_detail
+        WHERE order_id IN
+        <foreach collection="orderIds" item="orderId" open="(" separator="," close=")">
+            #{orderId}
+        </foreach>
+        ORDER BY order_id, id
+    </select>
+
     <insert id="insertBatch">
         INSERT INTO order_detail (order_id, drink_id, drink_name, image, spec, quantity, price) VALUES
         <foreach collection="list" item="item" separator=",">

@@ -73,11 +73,29 @@ public class OrderServiceImpl implements OrderService {
         if (total > 0) {
             records = orderMapper.pageQuery(query.getStatus(), query.getOrderNo(),
                     query.getOffset(), query.getPageSize());
-            for (Order order : records) {
-                order.setDetails(orderDetailMapper.listByOrderId(order.getId()));
-            }
+            fillDetails(records);
         }
         return new PageResult<>(total, records);
+    }
+
+    /**
+     * 批量装配订单明细：一次 IN 查询后按 orderId 内存分组，避免逐单查询
+     */
+    private void fillDetails(List<Order> orders) {
+        if (orders == null || orders.isEmpty()) {
+            return;
+        }
+        List<Long> orderIds = new ArrayList<>(orders.size());
+        for (Order order : orders) {
+            orderIds.add(order.getId());
+        }
+        Map<Long, List<OrderDetail>> grouped = new HashMap<>();
+        for (OrderDetail detail : orderDetailMapper.listByOrderIds(orderIds)) {
+            grouped.computeIfAbsent(detail.getOrderId(), k -> new ArrayList<>()).add(detail);
+        }
+        for (Order order : orders) {
+            order.setDetails(grouped.getOrDefault(order.getId(), new ArrayList<>()));
+        }
     }
 
     @Override
@@ -203,9 +221,7 @@ public class OrderServiceImpl implements OrderService {
     @Override
     public List<Order> listByUserId(Long userId, Integer status) {
         List<Order> orders = orderMapper.listByUserId(userId, status);
-        for (Order order : orders) {
-            order.setDetails(orderDetailMapper.listByOrderId(order.getId()));
-        }
+        fillDetails(orders);
         return orders;
     }
 
