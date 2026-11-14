@@ -7,6 +7,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 import java.util.ArrayList;
@@ -31,7 +32,8 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 @SpringBootTest(properties = {
         "spring.datasource.url=jdbc:mysql://127.0.0.1:3306/drink_order_perf?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf-8&allowPublicKeyRetrieval=true",
         "spring.datasource.username=root",
-        "spring.datasource.password=123456"
+        "spring.datasource.password=123456",
+        "spring.data.redis.database=15"
 })
 class OrderNoConcurrencyTest {
 
@@ -44,7 +46,12 @@ class OrderNoConcurrencyTest {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    @Autowired
+    private StringRedisTemplate redisTemplate;
+
     private long maxOrderIdBefore;
+
+    private final List<Long> costs = java.util.Collections.synchronizedList(new ArrayList<>());
 
     @BeforeEach
     void captureMaxId() {
@@ -56,8 +63,16 @@ class OrderNoConcurrencyTest {
     void cleanup() {
         jdbcTemplate.update("DELETE FROM order_detail WHERE order_id > ?", maxOrderIdBefore);
         jdbcTemplate.update("DELETE FROM `order` WHERE id > ?", maxOrderIdBefore);
+        Set<String> keys = redisTemplate.keys("order:seq:*");
+        if (keys != null && !keys.isEmpty()) {
+            redisTemplate.delete(keys);
+        }
+        Long after = jdbcTemplate.queryForObject("SELECT COALESCE(MAX(id), 0) FROM `order`", Long.class);
+        System.out.println("T1 污染检查: maxIdBefore=" + maxOrderIdBefore + ", maxIdAfterCleanup=" + after
+                + ", redisSeqKeysLeft=" + (redisTemplate.keys("order:seq:*") == null
+                        ? 0 : redisTemplate.keys("order:seq:*").size()));
+        assertEquals(maxOrderIdBefore, after == null ? 0L : after, "测试后未清理干净（MAX(id) 回退失败）");
     }
-
     @Test
     void concurrentSubmitProducesUniqueOrderNoAndPickupNo() throws Exception {
         ExecutorService pool = Executors.newFixedThreadPool(THREADS);
@@ -69,7 +84,9 @@ class OrderNoConcurrencyTest {
                 futures.add(pool.submit(() -> {
                     ready.countDown();
                     start.await();
+                    long t0 = System.nanoTime();
                     orderService.submit(USER_ID, buildDto());
+                    costs.add((System.nanoTime() - t0) / 1_000_000);
                     return Boolean.TRUE;
                 }));
             }
@@ -112,7 +129,9 @@ class OrderNoConcurrencyTest {
                 + ", distinctPickupNo=" + pickupNos.size()
                 + ", sameSecondPrefixes=" + secondPrefixes
                 + ", maxOrderNoLen=" + maxOrderNoLen
-                + ", maxPickupNoLen=" + maxPickupNoLen);
+                + ", maxPickupNoLen=" + maxPickupNoLen
+                + ", avgMs=" + (costs.stream().mapToLong(Long::longValue).sum() / Math.max(1, costs.size()))
+                + ", maxMs=" + costs.stream().mapToLong(Long::longValue).max().orElse(0));
 
         assertEquals(THREADS, orderNos.size(), "订单号存在重复: " + duplicateHint(orderNos, rows, "order_no"));
         assertEquals(THREADS, pickupNos.size(), "取餐号存在重复: " + duplicateHint(pickupNos, rows, "pickup_no"));

@@ -19,12 +19,20 @@ import org.springframework.data.redis.RedisConnectionFailureException;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
 
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -34,13 +42,14 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
- * T1 降级：Redis 不可用时仍可下单，订单号回退为「时间戳 + 随机后缀」且长度 ≤32。
- * 固定连 drink_order_perf，测试结束清理本次写入的行。
+ * T1 降级与冲突重试。
+ * 固定连 drink_order_perf + Redis db 15，测试结束清理本次写入的行与 seq key。
  */
 @SpringBootTest(properties = {
         "spring.datasource.url=jdbc:mysql://127.0.0.1:3306/drink_order_perf?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf-8&allowPublicKeyRetrieval=true",
         "spring.datasource.username=root",
-        "spring.datasource.password=123456"
+        "spring.datasource.password=123456",
+        "spring.data.redis.database=15"
 })
 class OrderNoRedisFallbackTest {
 
@@ -76,31 +85,91 @@ class OrderNoRedisFallbackTest {
     void cleanup() {
         jdbcTemplate.update("DELETE FROM order_detail WHERE order_id > ?", maxOrderIdBefore);
         jdbcTemplate.update("DELETE FROM `order` WHERE id > ?", maxOrderIdBefore);
+        Set<String> keys = redisTemplate.keys("order:seq:*");
+        if (keys != null && !keys.isEmpty()) {
+            redisTemplate.delete(keys);
+        }
+        Long after = jdbcTemplate.queryForObject("SELECT COALESCE(MAX(id), 0) FROM `order`", Long.class);
+        System.out.println("T1 污染检查: maxIdBefore=" + maxOrderIdBefore + ", maxIdAfterCleanup=" + after);
+        assertEquals(maxOrderIdBefore, after == null ? 0L : after, "测试后未清理干净（MAX(id) 回退失败）");
     }
 
-    @Test
-    void submitSucceedsWhenRedisUnavailable() {
+    private OrderServiceImpl fallbackService() {
         RedisUtil brokenRedis = new RedisUtil(redisTemplate) {
             @Override
             public long incrementWithTtl(String key, long timeout, TimeUnit unit) {
                 throw new RedisConnectionFailureException("simulated redis down");
             }
         };
-        OrderServiceImpl service = new OrderServiceImpl(
-                orderMapper, orderDetailMapper, drinkMapper, webSocketHandler, brokenRedis);
+        return new OrderServiceImpl(orderMapper, orderDetailMapper, drinkMapper, webSocketHandler, brokenRedis);
+    }
 
-        Map<String, Object> result = service.submit(USER_ID, buildDto());
+    /**
+     * 降级：Redis 不可用时仍能下单，且取餐号取订单号后 3 位、同批 200 单不重复
+     */
+    @Test
+    void submitSucceedsWhenRedisUnavailable() throws Exception {
+        OrderServiceImpl service = fallbackService();
 
-        String orderNo = String.valueOf(result.get("orderNo"));
-        System.out.println("T1 降级下单结果: orderNo=" + orderNo + ", length=" + orderNo.length());
+        Map<String, Object> single = service.submit(USER_ID, buildDto());
+        String singleOrderNo = String.valueOf(single.get("orderNo"));
+        System.out.println("T1 降级单测结果: orderNo=" + singleOrderNo + ", length=" + singleOrderNo.length());
 
-        assertNotNull(result.get("orderNo"), "降级后未返回订单号");
-        assertTrue(orderNo.length() <= 32, "降级订单号超长: " + orderNo.length());
-        assertTrue(orderNo.matches("\\d{20}"), "降级订单号格式不符: " + orderNo);
+        assertNotNull(single.get("orderNo"), "降级后未返回订单号");
+        assertTrue(singleOrderNo.length() <= 32, "降级订单号超长: " + singleOrderNo.length());
 
-        Integer rows = jdbcTemplate.queryForObject(
-                "SELECT COUNT(*) FROM `order` WHERE order_no = ? AND id > ?", Integer.class, orderNo, maxOrderIdBefore);
-        assertEquals(1, rows, "降级订单未落库");
+        int threads = 200;
+        ExecutorService pool = Executors.newFixedThreadPool(threads);
+        CountDownLatch ready = new CountDownLatch(threads);
+        CountDownLatch start = new CountDownLatch(1);
+        List<Future<Boolean>> futures = new ArrayList<>();
+        try {
+            for (int i = 0; i < threads; i++) {
+                futures.add(pool.submit(() -> {
+                    ready.countDown();
+                    start.await();
+                    service.submit(USER_ID, buildDto());
+                    return Boolean.TRUE;
+                }));
+            }
+            assertTrue(ready.await(30, TimeUnit.SECONDS), "线程池未全部就绪");
+            start.countDown();
+            int ok = 0;
+            for (Future<Boolean> f : futures) {
+                if (f.get(120, TimeUnit.SECONDS)) {
+                    ok++;
+                }
+            }
+            assertEquals(threads, ok, "降级并发下单存在失败请求");
+        } finally {
+            pool.shutdownNow();
+        }
+
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList(
+                "SELECT order_no, pickup_no FROM `order` WHERE id > ?", maxOrderIdBefore);
+        assertEquals(threads + 1, rows.size(), "落库订单数不符");
+
+        List<String> pickupNos = new ArrayList<>();
+        Set<String> orderNos = new HashSet<>();
+        int maxPickupLen = 0;
+        for (Map<String, Object> row : rows) {
+            String orderNo = String.valueOf(row.get("order_no"));
+            String pickupNo = String.valueOf(row.get("pickup_no"));
+            orderNos.add(orderNo);
+            pickupNos.add(pickupNo);
+            assertFalse("null".equals(pickupNo), "降级取餐号为 null");
+            assertEquals(orderNo.substring(orderNo.length() - 3), pickupNo, "降级取餐号不等于订单号后 3 位");
+            maxPickupLen = Math.max(maxPickupLen, pickupNo.length());
+        }
+        Set<String> distinctPickup = new HashSet<>(pickupNos);
+        System.out.println("T1 降级并发结果: threads=" + threads
+                + ", rows=" + rows.size()
+                + ", distinctOrderNo=" + orderNos.size()
+                + ", distinctPickupNo=" + distinctPickup.size()
+                + ", maxPickupNoLen=" + maxPickupLen);
+
+        assertEquals(threads + 1, distinctPickup.size(), "降级取餐号存在重复");
+        assertTrue(maxPickupLen <= 8, "降级取餐号超长: " + maxPickupLen);
     }
 
     /**
@@ -121,7 +190,7 @@ class OrderNoRedisFallbackTest {
         String orderNo = String.valueOf(result.get("orderNo"));
         System.out.println("T1 冲突重试结果: orderNo=" + orderNo);
 
-        assertNotEquals(null, result.get("orderNo"));
+        assertNotNull(result.get("orderNo"));
         Integer rows = jdbcTemplate.queryForObject(
                 "SELECT COUNT(*) FROM `order` WHERE order_no = ? AND id > ?", Integer.class, orderNo, maxOrderIdBefore);
         assertEquals(1, rows, "重试后订单未落库");
@@ -142,6 +211,33 @@ class OrderNoRedisFallbackTest {
         BusinessException ex = assertThrows(BusinessException.class, () -> service.submit(USER_ID, buildDto()));
         System.out.println("T1 二次冲突结果: message=" + ex.getMessage());
         assertEquals("下单失败，请重试", ex.getMessage());
+    }
+
+    /**
+     * 正常路径 RT（真实 Redis，串行 20 次），与降级 RT 同口径对比
+     */
+    @Test
+    void normalPathRtForComparison() {
+        OrderServiceImpl service = new OrderServiceImpl(
+                orderMapper, orderDetailMapper, drinkMapper, webSocketHandler, new RedisUtil(redisTemplate));
+
+        service.submit(USER_ID, buildDto());
+        int rounds = 20;
+        long[] costs = new long[rounds];
+        for (int i = 0; i < rounds; i++) {
+            long t0 = System.nanoTime();
+            service.submit(USER_ID, buildDto());
+            costs[i] = (System.nanoTime() - t0) / 1_000_000;
+        }
+        long max = 0;
+        long sum = 0;
+        for (long c : costs) {
+            max = Math.max(max, c);
+            sum += c;
+        }
+        System.out.println("T1 正常RT(真实Redis): rounds=" + rounds
+                + ", costsMs=" + java.util.Arrays.toString(costs)
+                + ", avgMs=" + (sum / rounds) + ", maxMs=" + max);
     }
 
     private OrderSubmitDTO buildDto() {

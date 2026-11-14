@@ -28,6 +28,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 @Slf4j
 @Service
@@ -38,6 +39,10 @@ public class OrderServiceImpl implements OrderService {
 
     /** 序列 key 过期时间（小时）：2 天，防止 key 无限增长 */
     private static final long ORDER_SEQ_TTL_HOURS = 48;
+
+    /** Redis 不可用时的降级后缀：随机种子 + JVM 内单调自增（单实例内唯一，多实例靠 uk_order_no 兜底） */
+    private static final AtomicLong FALLBACK_SEQ =
+            new AtomicLong(ThreadLocalRandom.current().nextInt(1_000_000));
 
     private final OrderMapper orderMapper;
     private final OrderDetailMapper orderDetailMapper;
@@ -146,7 +151,7 @@ public class OrderServiceImpl implements OrderService {
         // 生成订单号与取餐号（共用当日序列，保证取餐号同一营业日内不重号）
         long seq = nextDailySeq();
         String orderNo = buildOrderNo(seq);
-        String pickupNo = buildPickupNo(seq);
+        String pickupNo = buildPickupNo(seq, orderNo);
 
         // 创建订单
         Order order = new Order();
@@ -216,38 +221,38 @@ public class OrderServiceImpl implements OrderService {
 
     /**
      * 取当日序列号：Redis 原子自增（INCR + 首次 EXPIRE 同一脚本）。
-     * Redis 不可用时返回 -1，调用方降级为随机后缀，保证下单不被 Redis 单点阻断。
+     * Redis 不可用时返回 -1，调用方降级为本地自增后缀，保证下单不被 Redis 单点阻断。
      */
     private long nextDailySeq() {
         String key = ORDER_SEQ_KEY_PREFIX + LocalDate.now().format(DateTimeFormatter.BASIC_ISO_DATE);
         try {
             return redisUtil.incrementWithTtl(key, ORDER_SEQ_TTL_HOURS, TimeUnit.HOURS);
         } catch (Exception e) {
-            log.warn("Redis 序列不可用，订单号降级为随机后缀: key={}, cause={}", key, e.getMessage());
+            log.warn("Redis 序列不可用，订单号/取餐号降级为本地自增: key={}, cause={}", key, e.getMessage());
             return -1L;
         }
     }
 
     /**
-     * 生成订单号：年月日时分秒(14) + 当日序列(6位，溢出自然变长) = 20 字符，≤32
+     * 生成订单号：年月日时分秒(14) + 6 位后缀 = 20 字符，≤32。
+     * 降级后缀取「随机种子 + JVM 内单调自增」而非纯随机：纯随机 200 个后缀的后 3 位去重期望仅约 181，
+     * 无法保证取餐号同批不重；单调自增可保证同批 1000 单内后 3 位互不相同。
      */
     private String buildOrderNo(long seq) {
         String dateTime = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMddHHmmss"));
-        if (seq <= 0) {
-            return dateTime + String.format("%06d", ThreadLocalRandom.current().nextInt(1_000_000));
-        }
-        return dateTime + String.format("%06d", seq);
+        long suffix = seq > 0 ? seq : FALLBACK_SEQ.incrementAndGet();
+        return dateTime + String.format("%06d", Math.floorMod(suffix, 1_000_000L));
     }
 
     /**
-     * 生成取餐号：当日序列 %03d，超过 999 自然进位为 4 位，≤8
+     * 生成取餐号：正常路径为当日序列 %03d（超过 999 自然进位为 4 位，≤8）；
+     * 降级路径取订单号后 3 位，保证与订单号同源、同批不重号。
      */
-    private String buildPickupNo(long seq) {
-        if (seq <= 0) {
-            char letter = (char) ('A' + ThreadLocalRandom.current().nextInt(26));
-            return letter + String.format("%02d", ThreadLocalRandom.current().nextInt(100));
+    private String buildPickupNo(long seq, String orderNo) {
+        if (seq > 0) {
+            return String.format("%03d", seq);
         }
-        return String.format("%03d", seq);
+        return orderNo.substring(orderNo.length() - 3);
     }
 
     /**
@@ -260,8 +265,9 @@ public class OrderServiceImpl implements OrderService {
             log.warn("订单号冲突，换号重试一次, orderNo={}", order.getOrderNo());
             order.setId(null);
             long seq = nextDailySeq();
-            order.setOrderNo(buildOrderNo(seq));
-            order.setPickupNo(buildPickupNo(seq));
+            String retryOrderNo = buildOrderNo(seq);
+            order.setOrderNo(retryOrderNo);
+            order.setPickupNo(buildPickupNo(seq, retryOrderNo));
             try {
                 orderMapper.insert(order);
             } catch (DuplicateKeyException ex) {
