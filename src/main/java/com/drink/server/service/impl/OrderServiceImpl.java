@@ -12,11 +12,13 @@ import com.drink.server.mapper.DrinkMapper;
 import com.drink.server.mapper.OrderDetailMapper;
 import com.drink.server.mapper.OrderMapper;
 import com.drink.server.service.OrderService;
-import com.drink.server.config.OrderWebSocketHandler;
+import com.drink.server.service.PendingOrderCounter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
@@ -56,16 +58,16 @@ public class OrderServiceImpl implements OrderService {
     private final OrderMapper orderMapper;
     private final OrderDetailMapper orderDetailMapper;
     private final DrinkMapper drinkMapper;
-    private final OrderWebSocketHandler webSocketHandler;
+    private final PendingOrderCounter pendingOrderCounter;
     private final RedisUtil redisUtil;
 
     public OrderServiceImpl(OrderMapper orderMapper, OrderDetailMapper orderDetailMapper,
-                            DrinkMapper drinkMapper, OrderWebSocketHandler webSocketHandler,
+                            DrinkMapper drinkMapper, PendingOrderCounter pendingOrderCounter,
                             RedisUtil redisUtil) {
         this.orderMapper = orderMapper;
         this.orderDetailMapper = orderDetailMapper;
         this.drinkMapper = drinkMapper;
-        this.webSocketHandler = webSocketHandler;
+        this.pendingOrderCounter = pendingOrderCounter;
         this.redisUtil = redisUtil;
     }
 
@@ -122,7 +124,7 @@ public class OrderServiceImpl implements OrderService {
             throw new BusinessException("订单状态异常");
         }
         orderMapper.updateStatus(id, 2);
-        broadcast();
+        changePendingCount(-1);
     }
 
     @Override
@@ -150,7 +152,7 @@ public class OrderServiceImpl implements OrderService {
             throw new BusinessException("订单状态异常");
         }
         orderMapper.reject(id, 5, reason);
-        broadcast();
+        changePendingCount(-1);
     }
 
     @Override
@@ -221,7 +223,7 @@ public class OrderServiceImpl implements OrderService {
         Map<String, Object> result = new HashMap<>();
         result.put("orderNo", orderNo);
         result.put("amount", totalAmount);
-        broadcast();
+        changePendingCount(1);
         return result;
     }
 
@@ -245,23 +247,33 @@ public class OrderServiceImpl implements OrderService {
             throw new BusinessException("仅待接单状态可取消");
         }
         orderMapper.updateStatus(orderId, 5);
-        broadcast();
+        changePendingCount(-1);
     }
 
     @Override
     public long getPendingCount() {
-        return orderMapper.countByStatus(1);
+        return pendingOrderCounter.get();
     }
 
     /**
-     * 广播待接单数量给管理端
+     * 维护待接单数并在事务提交后广播。
+     *
+     * <p>提交前广播会让管理端看到尚未落库的状态（客户端立即回查可能扑空），
+     * 因此有事务上下文时统一挂到 {@code afterCommit}；无事务上下文（confirm/reject/cancel）
+     * 直接执行——这些路径单条 UPDATE 已是隐式提交。
+     *
+     * @param delta 待接单数增量：下单 +1，接单/拒单/取消 -1
      */
-    private void broadcast() {
-        try {
-            long count = orderMapper.countByStatus(1);
-            webSocketHandler.broadcastPendingCount(count);
-        } catch (Exception e) {
-            log.warn("广播待接单数量失败: {}", e.getMessage());
+    private void changePendingCount(int delta) {
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    pendingOrderCounter.onPendingDelta(delta);
+                }
+            });
+        } else {
+            pendingOrderCounter.onPendingDelta(delta);
         }
     }
 

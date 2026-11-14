@@ -8,6 +8,7 @@ import com.drink.server.entity.Order;
 import com.drink.server.mapper.DrinkMapper;
 import com.drink.server.mapper.OrderDetailMapper;
 import com.drink.server.mapper.OrderMapper;
+import com.drink.server.service.PendingOrderCounter;
 import com.drink.server.service.impl.OrderServiceImpl;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -65,7 +66,7 @@ class OrderNoRedisFallbackTest {
     private DrinkMapper drinkMapper;
 
     @Autowired
-    private OrderWebSocketHandler webSocketHandler;
+    private PendingOrderCounter pendingOrderCounter;
 
     @Autowired
     private StringRedisTemplate redisTemplate;
@@ -101,7 +102,7 @@ class OrderNoRedisFallbackTest {
                 throw new RedisConnectionFailureException("simulated redis down");
             }
         };
-        return new OrderServiceImpl(orderMapper, orderDetailMapper, drinkMapper, webSocketHandler, brokenRedis);
+        return new OrderServiceImpl(orderMapper, orderDetailMapper, drinkMapper, pendingOrderCounter, brokenRedis);
     }
 
     /**
@@ -185,7 +186,7 @@ class OrderNoRedisFallbackTest {
         when(spyMapper.countByStatus(anyInt())).thenAnswer(invocation -> orderMapper.countByStatus(invocation.getArgument(0)));
 
         OrderServiceImpl service = new OrderServiceImpl(
-                spyMapper, orderDetailMapper, drinkMapper, webSocketHandler, new RedisUtil(redisTemplate));
+                spyMapper, orderDetailMapper, drinkMapper, pendingOrderCounter, new RedisUtil(redisTemplate));
 
         Map<String, Object> result = service.submit(USER_ID, buildDto("retryOnce"));
         String orderNo = String.valueOf(result.get("orderNo"));
@@ -207,7 +208,7 @@ class OrderNoRedisFallbackTest {
         when(spyMapper.countByStatus(anyInt())).thenReturn(0L);
 
         OrderServiceImpl service = new OrderServiceImpl(
-                spyMapper, orderDetailMapper, drinkMapper, webSocketHandler, new RedisUtil(redisTemplate));
+                spyMapper, orderDetailMapper, drinkMapper, pendingOrderCounter, new RedisUtil(redisTemplate));
 
         BusinessException ex = assertThrows(BusinessException.class, () -> service.submit(USER_ID, buildDto("retryTwice")));
         System.out.println("T1 二次冲突结果: message=" + ex.getMessage());
@@ -220,7 +221,7 @@ class OrderNoRedisFallbackTest {
     @Test
     void normalPathRtForComparison() {
         OrderServiceImpl service = new OrderServiceImpl(
-                orderMapper, orderDetailMapper, drinkMapper, webSocketHandler, new RedisUtil(redisTemplate));
+                orderMapper, orderDetailMapper, drinkMapper, pendingOrderCounter, new RedisUtil(redisTemplate));
 
         service.submit(USER_ID, buildDto("rtWarmup"));
         int rounds = 20;

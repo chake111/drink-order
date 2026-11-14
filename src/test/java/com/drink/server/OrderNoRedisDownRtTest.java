@@ -6,6 +6,7 @@ import com.drink.server.dto.OrderSubmitDTO;
 import com.drink.server.mapper.DrinkMapper;
 import com.drink.server.mapper.OrderDetailMapper;
 import com.drink.server.mapper.OrderMapper;
+import com.drink.server.service.PendingOrderCounter;
 import com.drink.server.service.impl.OrderServiceImpl;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -52,7 +53,7 @@ class OrderNoRedisDownRtTest {
     private DrinkMapper drinkMapper;
 
     @Autowired
-    private OrderWebSocketHandler webSocketHandler;
+    private PendingOrderCounter pendingOrderCounter;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -88,7 +89,7 @@ class OrderNoRedisDownRtTest {
         StringRedisTemplate deadTemplate = new StringRedisTemplate(deadFactory);
         deadTemplate.afterPropertiesSet();
         OrderServiceImpl service = new OrderServiceImpl(orderMapper, orderDetailMapper,
-                drinkMapper, webSocketHandler, new RedisUtil(deadTemplate));
+                drinkMapper, pendingOrderCounter, new RedisUtil(deadTemplate));
 
         service.submit(USER_ID, buildDto());
 
