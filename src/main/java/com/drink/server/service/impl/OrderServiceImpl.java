@@ -123,7 +123,10 @@ public class OrderServiceImpl implements OrderService {
         if (order == null || order.getStatus() != 1) {
             throw new BusinessException("订单状态异常");
         }
-        orderMapper.updateStatus(id, 2);
+        // CAS：并发重复接单时只有一次能改到行，避免待接单数被扣两次
+        if (orderMapper.updateStatusIfMatch(id, 1, 2) == 0) {
+            throw new BusinessException("订单状态异常");
+        }
         changePendingCount(-1);
     }
 
@@ -133,7 +136,9 @@ public class OrderServiceImpl implements OrderService {
         if (order == null || order.getStatus() != 2) {
             throw new BusinessException("订单状态异常");
         }
-        orderMapper.updateStatus(id, 3);
+        if (orderMapper.updateStatusIfMatch(id, 2, 3) == 0) {
+            throw new BusinessException("订单状态异常");
+        }
     }
 
     @Override
@@ -142,7 +147,9 @@ public class OrderServiceImpl implements OrderService {
         if (order == null || order.getStatus() != 3) {
             throw new BusinessException("订单状态异常");
         }
-        orderMapper.updateStatus(id, 4);
+        if (orderMapper.updateStatusIfMatch(id, 3, 4) == 0) {
+            throw new BusinessException("订单状态异常");
+        }
     }
 
     @Override
@@ -151,7 +158,9 @@ public class OrderServiceImpl implements OrderService {
         if (order == null || order.getStatus() != 1) {
             throw new BusinessException("订单状态异常");
         }
-        orderMapper.reject(id, 5, reason);
+        if (orderMapper.rejectIfMatch(id, 1, 5, reason) == 0) {
+            throw new BusinessException("订单状态异常");
+        }
         changePendingCount(-1);
     }
 
@@ -246,7 +255,9 @@ public class OrderServiceImpl implements OrderService {
         if (order.getStatus() != 1) {
             throw new BusinessException("仅待接单状态可取消");
         }
-        orderMapper.updateStatus(orderId, 5);
+        if (orderMapper.updateStatusIfMatch(orderId, 1, 5) == 0) {
+            throw new BusinessException("仅待接单状态可取消");
+        }
         changePendingCount(-1);
     }
 

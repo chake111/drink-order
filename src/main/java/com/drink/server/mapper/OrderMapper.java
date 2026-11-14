@@ -27,8 +27,16 @@ public interface OrderMapper {
     /** 更新状态 */
     int updateStatus(@Param("id") Long id, @Param("status") Integer status);
 
+    /** 带期望状态的状态迁移（CAS）：仅当当前状态等于 expected 时才更新，返回 0 表示已被并发改走 */
+    int updateStatusIfMatch(@Param("id") Long id, @Param("expected") Integer expected,
+                            @Param("status") Integer status);
+
     /** 拒单（含原因） */
     int reject(@Param("id") Long id, @Param("status") Integer status, @Param("rejectReason") String rejectReason);
+
+    /** 带期望状态的拒单（CAS）：返回 0 表示状态已被并发改走 */
+    int rejectIfMatch(@Param("id") Long id, @Param("expected") Integer expected,
+                      @Param("status") Integer status, @Param("rejectReason") String rejectReason);
 
     /** 用户端：按用户ID查询订单列表 */
     List<Order> listByUserId(@Param("userId") Long userId, @Param("status") Integer status);
