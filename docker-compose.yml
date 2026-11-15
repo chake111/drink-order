@@ -20,6 +20,7 @@ services:
       # 只在数据卷为空（首次启动）时按文件名顺序执行
       - ./drink_order.sql:/docker-entrypoint-initdb.d/01-drink_order.sql:ro
       - ./db/order_index.sql:/docker-entrypoint-initdb.d/02-order_index.sql:ro
+      - ./db/order_index_user_time.sql:/docker-entrypoint-initdb.d/03-order_index_user_time.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
       interval: 10s

@@ -1,4 +1,4 @@
--- 用户端订单分页的覆盖索引
+-- 用户端订单分页的排序索引（消除 filesort）
 -- 目标查询（OrderMapper.listByUserIdPage）：
 --   SELECT ... FROM `order` WHERE user_id = ? [AND status = ?] ORDER BY create_time DESC LIMIT ?, ?
 --
@@ -7,6 +7,7 @@
 -- idx_user_id 是它的最左前缀，被完全覆盖，因此在同一条 ALTER 里删除，索引总数不变。
 --
 -- 目标库：MySQL 8.0，单条 ALTER 原子执行，避免出现「新索引没建、旧索引已删」的中间态。
+-- 一次性执行：重复跑会因 1091（索引已删）或 1061（索引已存在）报错，脚本不做幂等判断。
 
 ALTER TABLE `order`
     ADD INDEX idx_user_create_time (user_id, create_time),
