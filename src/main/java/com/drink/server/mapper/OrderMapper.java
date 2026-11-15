@@ -35,6 +35,15 @@ public interface OrderMapper {
     /** 用户端：按用户ID查询订单列表 */
     List<Order> listByUserId(@Param("userId") Long userId, @Param("status") Integer status);
 
+    /** 用户端分页查询（不含明细） */
+    List<Order> listByUserIdPage(@Param("userId") Long userId,
+                                 @Param("status") Integer status,
+                                 @Param("offset") int offset,
+                                 @Param("pageSize") int pageSize);
+
+    /** 用户端订单总数 */
+    long countByUserId(@Param("userId") Long userId, @Param("status") Integer status);
+
     /** 今日概览 */
     Map<String, Object> todayOverview();
 

@@ -5,6 +5,7 @@ import com.drink.server.common.PageResult;
 import com.drink.server.common.Result;
 import com.drink.server.dto.OrderPageQuery;
 import com.drink.server.dto.OrderSubmitDTO;
+import com.drink.server.dto.UserOrderPageQuery;
 import com.drink.server.entity.Order;
 import com.drink.server.service.OrderService;
 import io.jsonwebtoken.Claims;
@@ -84,6 +85,12 @@ public class OrderController {
                                               HttpServletRequest request) {
         Long userId = getUserId(request);
         return Result.success(orderService.listByUserId(userId, status));
+    }
+
+    @GetMapping("/user/order/page")
+    public Result<PageResult<Order>> userOrderPage(UserOrderPageQuery query, HttpServletRequest request) {
+        Long userId = getUserId(request);
+        return Result.success(orderService.pageByUserId(userId, query));
     }
 
     @PostMapping("/user/order/cancel/{id}")

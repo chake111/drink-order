@@ -3,6 +3,7 @@ package com.drink.server.service;
 import com.drink.server.common.PageResult;
 import com.drink.server.dto.OrderPageQuery;
 import com.drink.server.dto.OrderSubmitDTO;
+import com.drink.server.dto.UserOrderPageQuery;
 import com.drink.server.entity.Order;
 import java.util.List;
 import java.util.Map;
@@ -32,6 +33,9 @@ public interface OrderService {
 
     /** 用户端查询订单列表 */
     List<Order> listByUserId(Long userId, Integer status);
+
+    /** 用户端分页查询订单（明细只装配当前页） */
+    PageResult<Order> pageByUserId(Long userId, UserOrderPageQuery query);
 
     /** 用户端取消订单 */
     void cancel(Long userId, Long orderId);

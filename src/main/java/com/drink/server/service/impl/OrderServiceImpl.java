@@ -5,6 +5,7 @@ import com.drink.server.common.PageResult;
 import com.drink.server.common.RedisUtil;
 import com.drink.server.dto.OrderPageQuery;
 import com.drink.server.dto.OrderSubmitDTO;
+import com.drink.server.dto.UserOrderPageQuery;
 import com.drink.server.entity.Drink;
 import com.drink.server.entity.Order;
 import com.drink.server.entity.OrderDetail;
@@ -241,6 +242,23 @@ public class OrderServiceImpl implements OrderService {
         List<Order> orders = orderMapper.listByUserId(userId, status);
         fillDetails(orders);
         return orders;
+    }
+
+    @Override
+    public PageResult<Order> pageByUserId(Long userId, UserOrderPageQuery query) {
+        int page = query.getPage() == null || query.getPage() < 1 ? 1 : query.getPage();
+        int pageSize = query.getPageSize() == null ? 10 : Math.min(Math.max(query.getPageSize(), 1), 50);
+        query.setPage(page);
+        query.setPageSize(pageSize);
+
+        long total = orderMapper.countByUserId(userId, query.getStatus());
+        if (total == 0) {
+            return new PageResult<>(0L, new ArrayList<>());
+        }
+        List<Order> records = orderMapper.listByUserIdPage(
+                userId, query.getStatus(), query.getOffset(), pageSize);
+        fillDetails(records);
+        return new PageResult<>(total, records);
     }
 
     @Override

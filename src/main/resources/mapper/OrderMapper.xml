@@ -66,6 +66,25 @@
         ORDER BY create_time DESC
     </select>
 
+    <select id="listByUserIdPage" resultType="com.drink.server.entity.Order">
+        SELECT id, user_id, order_no, amount, status, pickup_type, pickup_no, reject_reason, create_time
+        FROM `order`
+        WHERE user_id = #{userId}
+        <if test="status != null">
+            AND status = #{status}
+        </if>
+        ORDER BY create_time DESC
+        LIMIT #{offset}, #{pageSize}
+    </select>
+
+    <select id="countByUserId" resultType="long">
+        SELECT COUNT(*) FROM `order`
+        WHERE user_id = #{userId}
+        <if test="status != null">
+            AND status = #{status}
+        </if>
+    </select>
+
     <select id="todayOverview" resultType="java.util.Map">
         SELECT
             COUNT(*) AS todayOrders,
