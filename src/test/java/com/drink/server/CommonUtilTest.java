@@ -3,6 +3,7 @@ package com.drink.server;
 import com.drink.server.common.BusinessException;
 import com.drink.server.common.FileUtil;
 import com.drink.server.common.Md5Util;
+import com.drink.server.common.PageQuery;
 import com.drink.server.common.Result;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -46,6 +47,33 @@ class CommonUtilTest {
         assertEquals(0, error.getCode());
         assertEquals("出错了", error.getMsg());
         assertNull(error.getData());
+    }
+
+    @Test
+    void pageOffsetSurvivesIntegerOverflow() {
+        PageQuery query = new PageQuery();
+        query.setPage(2147483647);
+        query.setPageSize(50);
+        assertEquals(Integer.MAX_VALUE, query.getOffset(), "超大 page 应收口到 int 上限而不是溢出成负数");
+
+        query.setPage(3);
+        query.setPageSize(10);
+        assertEquals(20, query.getOffset());
+
+        query.setPage(0);
+        assertEquals(0, query.getOffset(), "page<1 应按第 1 页");
+
+        query.setPage(1);
+        query.setPageSize(0);
+        assertEquals(0, query.getOffset());
+
+        query.setPage(1);
+        query.setPageSize(-5);
+        assertEquals(0, query.getOffset(), "负 pageSize 应归 0，不能拼出负 offset");
+
+        query.setPage(null);
+        query.setPageSize(null);
+        assertEquals(0, query.getOffset());
     }
 
     @Test
