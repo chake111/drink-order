@@ -14,6 +14,7 @@ import com.drink.server.service.PendingOrderCounter;
 import com.drink.server.service.impl.OrderServiceImpl;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import org.springframework.boot.ApplicationArguments;
 import org.springframework.data.redis.connection.Message;
 import org.springframework.data.redis.core.StringRedisTemplate;
@@ -178,9 +179,14 @@ class InfrastructureTest {
         counter.calibrate();
         assertEquals(9, counter.get(), "抢到校准权后应回源 DB");
 
-        when(mapper.countByStatus(1)).thenReturn(9L);
+        when(mapper.countByStatus(1)).thenReturn(12L);
         counter.calibrate();
-        verify(redis, org.mockito.Mockito.atLeastOnce()).convertAndSend(anyString(), any(Object.class));
+        assertEquals(12, counter.get(), "DB 变化后应再次校准");
+        ArgumentCaptor<String> payload = ArgumentCaptor.forClass(String.class);
+        verify(redis, org.mockito.Mockito.atLeastOnce())
+                .convertAndSend(anyString(), payload.capture());
+        assertTrue(payload.getAllValues().stream().anyMatch(p -> p.contains("\"count\":12")),
+                "校准后应发布新的绝对值: " + payload.getAllValues());
 
         when(ops.setIfAbsent(anyString(), anyString(), anyLong(), any(TimeUnit.class)))
                 .thenThrow(new IllegalStateException("redis down"));

@@ -89,7 +89,7 @@ class ApiEndpointsTest {
 
     @AfterEach
     void cleanRedisKeys() {
-        for (String pattern : new String[]{"order:seq:*", "idem:order:*"}) {
+        for (String pattern : new String[]{"order:seq:*", "idem:order:*", "drink:category:*"}) {
             var keys = redisTemplate.keys(pattern);
             if (keys != null && !keys.isEmpty()) {
                 redisTemplate.delete(keys);
@@ -176,13 +176,20 @@ class ApiEndpointsTest {
 
     @Test
     void adminLoginRejectsDisabledAccount() throws Exception {
-        Long adminId = jdbcTemplate.queryForObject(
-                "SELECT id FROM employee WHERE account = 'admin'", Long.class);
-        okJson(post("/api/employee/status/0?id=" + adminId).header("Authorization", bearer(adminToken)));
+        String account = "disabled_" + System.nanoTime();
+        okJson(post("/api/employee")
+                .header("Authorization", bearer(adminToken))
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"name\":\"待禁用\",\"account\":\"" + account
+                        + "\",\"password\":\"123456\",\"role\":\"店员\"}"));
+        Long employeeId = jdbcTemplate.queryForObject(
+                "SELECT id FROM employee WHERE account = ?", Long.class, account);
+        okJson(post("/api/employee/status/0?id=" + employeeId)
+                .header("Authorization", bearer(adminToken)));
 
         JsonNode body = json(post("/api/admin/login")
                 .contentType(MediaType.APPLICATION_JSON)
-                .content("{\"account\":\"admin\",\"password\":\"123456\"}"));
+                .content("{\"account\":\"" + account + "\",\"password\":\"123456\"}"));
         assertEquals("账号已被禁用", body.path("msg").asText());
     }
 
@@ -448,8 +455,10 @@ class ApiEndpointsTest {
         JsonNode missing = okJson(get("/api/order/99999999").header("Authorization", bearer(adminToken)));
         assertEquals("订单不存在", missing.path("msg").asText());
 
+        // 计数存在内存里、只在真正提交后变动；本类用 @Transactional 回滚，事务内不会触发
+        // afterCommit，因此这里只校验接口形态，计数增减由 PendingCountTest（非事务）覆盖
         JsonNode pending = okJson(get("/api/order/pending-count").header("Authorization", bearer(adminToken)));
-        assertTrue(pending.path("data").asLong() >= 0);
+        assertTrue(pending.path("data").isNumber(), "pending-count 应返回数值");
     }
 
     @Test
@@ -502,10 +511,14 @@ class ApiEndpointsTest {
         JsonNode list = json(get("/api/user/order/list").header("Authorization", bearer(userToken)));
         assertTrue(list.path("data").size() >= 1);
 
+        int expectedTotal = jdbcTemplate.queryForObject(
+                "SELECT COUNT(*) FROM `order` o JOIN user u ON o.user_id = u.id WHERE u.openid = ?",
+                Integer.class, USER_OPENID);
         JsonNode page = json(get("/api/user/order/page?page=1&pageSize=2")
                 .header("Authorization", bearer(userToken)));
         assertEquals(1, page.path("code").asInt());
-        assertTrue(page.path("data").path("records").size() <= 2);
+        assertEquals(expectedTotal, page.path("data").path("total").asInt(), "total 应等于该用户订单总数");
+        assertEquals(2, page.path("data").path("records").size(), "首页应恰好返回 pageSize 条");
 
         okJson(post("/api/user/order/cancel/" + orderId).header("Authorization", bearer(userToken)));
         assertEquals(5, jdbcTemplate.queryForObject(
@@ -546,6 +559,15 @@ class ApiEndpointsTest {
         JsonNode wrongState = json(post("/api/user/order/cancel/" + notPending)
                 .header("Authorization", bearer(userToken)));
         assertEquals("仅待接单状态可取消", wrongState.path("msg").asText());
+    }
+
+    @Test
+    void userOrderPageClampsHugePageNumber() throws Exception {
+        JsonNode body = json(get("/api/user/order/page?page=2147483647&pageSize=50")
+                .header("Authorization", bearer(userToken)));
+        assertEquals(1, body.path("code").asInt(), "超大 page 不应导致 500: " + body);
+        assertTrue(body.path("data").path("total").asLong() > 0);
+        assertTrue(body.path("data").path("records").isEmpty());
     }
 
     // ==================== 看板 ====================
