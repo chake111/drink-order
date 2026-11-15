@@ -246,7 +246,9 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     public PageResult<Order> pageByUserId(Long userId, UserOrderPageQuery query) {
-        int page = query.getPage() == null || query.getPage() < 1 ? 1 : query.getPage();
+        // 上限收口：page 过大时 (page-1)*pageSize 会 int 溢出成负 offset，MySQL 直接报语法错
+        int page = query.getPage() == null || query.getPage() < 1
+                ? 1 : Math.min(query.getPage(), 1_000_000);
         int pageSize = query.getPageSize() == null ? 10 : Math.min(Math.max(query.getPageSize(), 1), 50);
         query.setPage(page);
         query.setPageSize(pageSize);
