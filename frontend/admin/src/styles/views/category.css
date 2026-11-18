@@ -1,0 +1,242 @@
+.page-header { display: flex; align-items: flex-end; justify-content: space-between; margin-bottom: 18px; }
+.page-header h1 { font-size: 21px; font-weight: 600; }
+.page-header p { font-size: 13px; color: var(--ink-3); margin-top: 5px; }
+
+/* 卡片网格 */
+.cat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+.cat-card {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 18px;
+  box-shadow: var(--shadow);
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  transition: all 0.15s;
+  user-select: none;
+}
+
+.cat-card:hover {
+  border-color: var(--line-strong);
+  transform: translateY(-2px);
+}
+
+/* 拖拽手柄 */
+.drag-handle {
+  cursor: grab;
+  color: var(--ink-3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  transition: color 0.15s, background 0.15s;
+}
+
+.drag-handle:hover {
+  color: var(--primary);
+  background: var(--primary-weak);
+}
+
+.drag-handle:active {
+  cursor: grabbing;
+}
+
+/* 拖拽占位符（ghost） */
+.cat-ghost {
+  opacity: 0.4;
+  border: 2px dashed var(--primary) !important;
+  background: var(--primary-weak) !important;
+  box-shadow: none !important;
+}
+
+/* 被选中时 */
+.cat-chosen {
+  box-shadow: var(--shadow-lg) !important;
+  transform: scale(1.02);
+}
+
+/* 拖拽中 */
+.cat-drag {
+  opacity: 0.9;
+  transform: rotate(1.5deg);
+}
+
+.cat-icon {
+  width: 48px;
+  height: 48px;
+  border-radius: 13px;
+  background: var(--primary-weak);
+  color: var(--primary);
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+}
+
+.cat-icon svg {
+  width: 24px;
+  height: 24px;
+}
+
+.cat-mid {
+  flex: 1;
+  min-width: 0;
+}
+
+.cat-name {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.cat-meta {
+  font-size: 12.5px;
+  color: var(--ink-3);
+  margin-top: 3px;
+}
+
+.cat-actions {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.cat-ops {
+  display: flex;
+  gap: 2px;
+}
+
+.op-text {
+  font-size: 13px;
+  color: var(--primary);
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 5px;
+}
+
+.op-text:hover { background: var(--primary-weak); }
+.op-text.del { color: var(--off); }
+.op-text.del:hover { background: var(--off-weak); }
+
+.op-sep {
+  width: 1px;
+  height: 12px;
+  background: var(--line-strong);
+  margin: 0 2px;
+  align-self: center;
+}
+
+/* toggle 开关 */
+.toggle {
+  width: 40px;
+  height: 22px;
+  border-radius: 999px;
+  background: var(--line-strong);
+  position: relative;
+  cursor: pointer;
+  transition: 0.18s;
+  flex-shrink: 0;
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.toggle.on { background: var(--ok); }
+
+.toggle::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: #fff;
+  transition: 0.18s;
+  box-shadow: 0 1px 3px rgba(0,0,0,.2);
+}
+
+.toggle.on::after { left: 20px; }
+
+.cat-empty {
+  grid-column: 1 / -1;
+  text-align: center;
+  padding: 60px 20px;
+  color: var(--ink-3);
+  font-size: 14px;
+}
+
+.cat-foot {
+  margin-top: 22px;
+  font-size: 13px;
+  color: var(--ink-3);
+}
+
+/* 图标选择器 */
+.icon-picker {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.icon-opt {
+  width: 56px;
+  height: 56px;
+  border-radius: var(--radius);
+  border: 2px solid var(--line);
+  background: var(--surface);
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  transition: all 0.15s;
+  color: var(--ink-2);
+}
+
+.icon-opt:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+
+.icon-opt.picked {
+  border-color: var(--primary);
+  background: var(--primary-weak);
+  color: var(--primary);
+}
+
+.icon-opt svg {
+  width: 26px;
+  height: 26px;
+}
+
+/* switch-field */
+.switch-field {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 13px 16px;
+  width: 100%;
+}
+
+.switch-text {
+  font-size: 13.5px;
+}
+
+.switch-text small {
+  display: block;
+  color: var(--ink-3);
+  font-size: 12px;
+  margin-top: 2px;
+}
+
+.switch-field .toggle {
+  margin-left: auto;
+}
