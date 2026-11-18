@@ -5,12 +5,12 @@
 FROM maven:3.9-eclipse-temurin-17 AS build
 WORKDIR /build
 
-# 先只拷 pom，依赖层可被缓存：源码改动不会让依赖重新下载
+# 镜像源只影响容器内构建；依赖目录用 BuildKit 缓存，源码改动不会重新下载
+COPY docker/maven-settings.xml ./maven-settings.xml
 COPY pom.xml .
-RUN mvn -B -q dependency:go-offline
-
 COPY src ./src
-RUN mvn -B -q -DskipTests package
+RUN --mount=type=cache,target=/root/.m2/repository \
+    mvn -B -q -s maven-settings.xml -DskipTests package
 
 # ---------- 运行阶段 ----------
 FROM eclipse-temurin:17-jre-jammy
