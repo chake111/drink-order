@@ -31,7 +31,7 @@ request.interceptors.response.use(
       if (error.response.status === 401) {
         localStorage.removeItem('admin_token')
         localStorage.removeItem('admin_info')
-        window.location.href = '/login'
+        window.location.href = '/admin/login'
       }
     }
     return Promise.reject(error)

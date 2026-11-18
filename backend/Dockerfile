@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 # 多阶段构建：构建阶段带 Maven + JDK，运行阶段只留 JRE，镜像更小且不带构建工具
 # 注意：已验证（2026-11-14，Docker 29.9.3）：构建成功、镜像内以 uid=999(app) 运行、mvn 未泄漏到运行镜像
 
@@ -14,7 +13,7 @@ COPY src ./src
 RUN mvn -B -q -DskipTests package
 
 # ---------- 运行阶段 ----------
-FROM eclipse-temurin:17-jre
+FROM eclipse-temurin:17-jre-jammy
 
 # 非 root 运行：容器被拿下时不至于直接拿到 root
 RUN groupadd --system app && useradd --system --gid app --home-dir /app --shell /usr/sbin/nologin app

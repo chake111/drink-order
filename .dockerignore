@@ -1,0 +1,8 @@
+# 只服务 deploy/Dockerfile.web 的根构建上下文：后端和文档与前端镜像无关
+.git
+.github
+backend
+docs
+**/node_modules
+**/dist
+**/*.log

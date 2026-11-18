@@ -1,6 +1,7 @@
-# drink-server 一键起服务：MySQL + Redis + 应用
-# 已验证（2026-11-14，Docker 29.9.3 / Compose v5.7.0）：build 通过、三容器 healthy、
-# initdb 建表+索引生效、下单/幂等/待接单数接口通。
+# drink-order 一键起服务：MySQL + Redis + Spring Boot + nginx（用户端 / 管理端）
+# 单入口：http://localhost/（用户端）  http://localhost/admin/（管理端）
+
+name: drink-order
 
 services:
   mysql:
@@ -17,10 +18,8 @@ services:
       - --default-time-zone=+08:00
     volumes:
       - mysql-data:/var/lib/mysql
-      # 只在数据卷为空（首次启动）时按文件名顺序执行
-      - ./drink_order.sql:/docker-entrypoint-initdb.d/01-drink_order.sql:ro
-      - ./db/order_index.sql:/docker-entrypoint-initdb.d/02-order_index.sql:ro
-      - ./db/order_index_user_time.sql:/docker-entrypoint-initdb.d/03-order_index_user_time.sql:ro
+      # 仅在数据卷为空（首次启动）时按文件名顺序执行
+      - ./deploy/mysql/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -p\"$$MYSQL_ROOT_PASSWORD\" --silent"]
       interval: 10s
@@ -42,11 +41,11 @@ services:
       retries: 12
       start_period: 10s
 
-  app:
+  backend:
     build:
-      context: .
+      context: ./backend
       dockerfile: Dockerfile
-    container_name: drink-app
+    container_name: drink-backend
     restart: unless-stopped
     depends_on:
       mysql:
@@ -54,20 +53,36 @@ services:
       redis:
         condition: service_healthy
     environment:
-      # 全部走环境变量覆盖，application.yml 零改动
       SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/drink_order?useSSL=false&serverTimezone=Asia/Shanghai&characterEncoding=utf-8&allowPublicKeyRetrieval=true
       SPRING_DATASOURCE_USERNAME: root
       SPRING_DATASOURCE_PASSWORD: ${MYSQL_ROOT_PASSWORD:-123456}
       SPRING_DATA_REDIS_HOST: redis
       SPRING_DATA_REDIS_PORT: "6379"
       DRINK_UPLOAD_PATH: /app/upload/
-      # 来源变量带项目前缀，避免继承宿主上其它项目遗留的通用 JWT_SECRET 环境变量。
-      # 容器内变量名仍是 JWT_SECRET（Spring 松散绑定 → jwt.secret）。
+      # 容器内变量名是 JWT_SECRET（Spring 松散绑定 → jwt.secret）
       JWT_SECRET: ${DRINK_JWT_SECRET:-drink_order_secret_key_2026}
-    ports:
-      - "${APP_PORT:-8080}:8080"
     volumes:
       - upload-data:/app/upload
+    expose:
+      - "8080"
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c 'exec 3<>/dev/tcp/127.0.0.1/8080'"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 30s
+
+  web:
+    build:
+      context: .
+      dockerfile: deploy/Dockerfile.web
+    container_name: drink-web
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "${APP_PORT:-80}:80"
 
 volumes:
   mysql-data:
