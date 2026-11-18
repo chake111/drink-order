@@ -1,0 +1,11 @@
+target/
+node_modules/
+dist/
+*.log
+.idea/
+*.iml
+.DS_Store
+Thumbs.db
+upload/
+.env
+.env.local
