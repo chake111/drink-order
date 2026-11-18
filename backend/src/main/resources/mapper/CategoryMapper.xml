@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="com.drink.server.mapper.CategoryMapper">
+
+    <select id="list" resultType="com.drink.server.entity.Category">
+        SELECT c.id, c.name, c.icon, c.sort, c.status, c.create_time, c.update_time,
+               IFNULL(dc.drink_count, 0) AS drink_count
+        FROM category c
+        LEFT JOIN (
+            SELECT category_id, COUNT(*) AS drink_count
+            FROM drink
+            GROUP BY category_id
+        ) dc ON dc.category_id = c.id
+        ORDER BY c.sort ASC, c.id ASC
+    </select>
+
+    <select id="getById" resultType="com.drink.server.entity.Category">
+        SELECT id, name, icon, sort, status, create_time, update_time
+        FROM category WHERE id = #{id}
+    </select>
+
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id">
+        INSERT INTO category (name, icon, sort, status)
+        VALUES (#{name}, #{icon}, #{sort}, #{status})
+    </insert>
+
+    <update id="update">
+        UPDATE category
+        <set>
+            <if test="name != null">name = #{name},</if>
+            <if test="icon != null">icon = #{icon},</if>
+            <if test="sort != null">sort = #{sort},</if>
+            <if test="status != null">status = #{status},</if>
+        </set>
+        WHERE id = #{id}
+    </update>
+
+    <delete id="deleteById">
+        DELETE FROM category WHERE id = #{id}
+    </delete>
+
+    <update id="updateStatus">
+        UPDATE category SET status = #{status} WHERE id = #{id}
+    </update>
+
+    <update id="updateSort">
+        UPDATE category SET sort = #{sort} WHERE id = #{id}
+    </update>
+
+    <select id="maxSort" resultType="java.lang.Integer">
+        SELECT MAX(sort) FROM category
+    </select>
+
+</mapper>

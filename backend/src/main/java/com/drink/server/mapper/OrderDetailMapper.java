@@ -1,0 +1,19 @@
+package com.drink.server.mapper;
+
+import com.drink.server.entity.OrderDetail;
+import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
+import java.util.List;
+
+@Mapper
+public interface OrderDetailMapper {
+
+    /** 根据订单ID查询明细 */
+    List<OrderDetail> listByOrderId(@Param("orderId") Long orderId);
+
+    /** 根据订单ID列表批量查询明细（避免逐单查询的 N+1） */
+    List<OrderDetail> listByOrderIds(@Param("orderIds") List<Long> orderIds);
+
+    /** 批量插入 */
+    int insertBatch(@Param("list") List<OrderDetail> list);
+}
