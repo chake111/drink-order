@@ -11,7 +11,10 @@ import com.drink.server.mapper.OrderDetailMapper;
 import com.drink.server.mapper.OrderMapper;
 import com.drink.server.service.PendingCountSubscriber;
 import com.drink.server.service.PendingOrderCounter;
-import com.drink.server.service.impl.OrderServiceImpl;
+import com.drink.server.service.order.OrderCommandService;
+import com.drink.server.service.order.OrderIdempotencyGuard;
+import com.drink.server.service.order.OrderNoGenerator;
+import com.drink.server.service.order.OrderQueryService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -257,7 +260,8 @@ class InfrastructureTest {
         DrinkMapper drinkMapper = mock(DrinkMapper.class);
         PendingOrderCounter counter = mock(PendingOrderCounter.class);
         RedisUtil redisUtil = mock(RedisUtil.class);
-        OrderServiceImpl service = new OrderServiceImpl(orderMapper, detailMapper, drinkMapper, counter, redisUtil);
+        OrderCommandService service = new OrderCommandService(orderMapper, detailMapper, drinkMapper, counter,
+                new OrderNoGenerator(redisUtil), new OrderIdempotencyGuard(redisUtil));
 
         Order making = new Order();
         making.setId(1L);
@@ -293,10 +297,7 @@ class InfrastructureTest {
     void paginationReturnsEmptyWhenNoOrders() {
         OrderMapper orderMapper = mock(OrderMapper.class);
         OrderDetailMapper detailMapper = mock(OrderDetailMapper.class);
-        DrinkMapper drinkMapper = mock(DrinkMapper.class);
-        PendingOrderCounter counter = mock(PendingOrderCounter.class);
-        RedisUtil redisUtil = mock(RedisUtil.class);
-        OrderServiceImpl service = new OrderServiceImpl(orderMapper, detailMapper, drinkMapper, counter, redisUtil);
+        OrderQueryService service = new OrderQueryService(orderMapper, detailMapper);
 
         when(orderMapper.countByUserId(eq(99L), any())).thenReturn(0L);
 

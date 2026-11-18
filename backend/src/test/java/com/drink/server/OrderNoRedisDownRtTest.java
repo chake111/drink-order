@@ -7,7 +7,9 @@ import com.drink.server.mapper.DrinkMapper;
 import com.drink.server.mapper.OrderDetailMapper;
 import com.drink.server.mapper.OrderMapper;
 import com.drink.server.service.PendingOrderCounter;
-import com.drink.server.service.impl.OrderServiceImpl;
+import com.drink.server.service.order.OrderCommandService;
+import com.drink.server.service.order.OrderIdempotencyGuard;
+import com.drink.server.service.order.OrderNoGenerator;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -88,8 +90,10 @@ class OrderNoRedisDownRtTest {
     void submitSucceedsAndStaysFastWhenRedisPortIsDead() {
         StringRedisTemplate deadTemplate = new StringRedisTemplate(deadFactory);
         deadTemplate.afterPropertiesSet();
-        OrderServiceImpl service = new OrderServiceImpl(orderMapper, orderDetailMapper,
-                drinkMapper, pendingOrderCounter, new RedisUtil(deadTemplate));
+        RedisUtil deadRedis = new RedisUtil(deadTemplate);
+        OrderCommandService service = new OrderCommandService(orderMapper, orderDetailMapper,
+                drinkMapper, pendingOrderCounter,
+                new OrderNoGenerator(deadRedis), new OrderIdempotencyGuard(deadRedis));
 
         service.submit(USER_ID, buildDto());
 

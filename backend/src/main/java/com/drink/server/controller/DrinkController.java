@@ -2,6 +2,7 @@ package com.drink.server.controller;
 
 import com.drink.server.common.PageResult;
 import com.drink.server.common.Result;
+import com.drink.server.dto.DrinkFormDTO;
 import com.drink.server.dto.DrinkPageQuery;
 import com.drink.server.entity.Drink;
 import com.drink.server.service.DrinkService;
@@ -35,38 +36,14 @@ public class DrinkController {
     }
 
     @PostMapping
-    public Result<Void> add(@RequestParam("name") String name,
-                            @RequestParam("categoryId") Long categoryId,
-                            @RequestParam("price") java.math.BigDecimal price,
-                            @RequestParam(value = "image", required = false) String image,
-                            @RequestParam(value = "description", required = false) String description,
-                            @RequestParam(value = "flavors", required = false) String flavors) {
-        Drink drink = new Drink();
-        drink.setName(name);
-        drink.setCategoryId(categoryId);
-        drink.setPrice(price);
-        drink.setImage(image);
-        drink.setDescription(description);
-        drinkService.add(drink, flavors);
+    public Result<Void> add(@ModelAttribute DrinkFormDTO form) {
+        drinkService.add(form.toEntity(), form.getFlavors());
         return Result.success("新增成功", null);
     }
 
     @PutMapping
-    public Result<Void> update(@RequestParam("id") Long id,
-                               @RequestParam("name") String name,
-                               @RequestParam("categoryId") Long categoryId,
-                               @RequestParam("price") java.math.BigDecimal price,
-                               @RequestParam(value = "image", required = false) String image,
-                               @RequestParam(value = "description", required = false) String description,
-                               @RequestParam(value = "flavors", required = false) String flavors) {
-        Drink drink = new Drink();
-        drink.setId(id);
-        drink.setName(name);
-        drink.setCategoryId(categoryId);
-        drink.setPrice(price);
-        drink.setImage(image);
-        drink.setDescription(description);
-        drinkService.update(drink, flavors);
+    public Result<Void> update(@ModelAttribute DrinkFormDTO form) {
+        drinkService.update(form.toEntity(), form.getFlavors());
         return Result.success("修改成功", null);
     }
 

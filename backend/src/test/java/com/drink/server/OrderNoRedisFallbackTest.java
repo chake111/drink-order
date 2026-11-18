@@ -9,7 +9,9 @@ import com.drink.server.mapper.DrinkMapper;
 import com.drink.server.mapper.OrderDetailMapper;
 import com.drink.server.mapper.OrderMapper;
 import com.drink.server.service.PendingOrderCounter;
-import com.drink.server.service.impl.OrderServiceImpl;
+import com.drink.server.service.order.OrderCommandService;
+import com.drink.server.service.order.OrderIdempotencyGuard;
+import com.drink.server.service.order.OrderNoGenerator;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -95,14 +97,20 @@ class OrderNoRedisFallbackTest {
         assertEquals(maxOrderIdBefore, after == null ? 0L : after, "测试后未清理干净（MAX(id) 回退失败）");
     }
 
-    private OrderServiceImpl fallbackService() {
+    private OrderCommandService fallbackService() {
         RedisUtil brokenRedis = new RedisUtil(redisTemplate) {
             @Override
             public long incrementWithTtl(String key, long timeout, TimeUnit unit) {
                 throw new RedisConnectionFailureException("simulated redis down");
             }
         };
-        return new OrderServiceImpl(orderMapper, orderDetailMapper, drinkMapper, pendingOrderCounter, brokenRedis);
+        return commandService(orderMapper, brokenRedis);
+    }
+
+    /** 直接构造写模型，验证生成器/幂等保护在降级与冲突场景下的行为 */
+    private OrderCommandService commandService(OrderMapper mapper, RedisUtil redis) {
+        return new OrderCommandService(mapper, orderDetailMapper, drinkMapper, pendingOrderCounter,
+                new OrderNoGenerator(redis), new OrderIdempotencyGuard(redis));
     }
 
     /**
@@ -110,7 +118,7 @@ class OrderNoRedisFallbackTest {
      */
     @Test
     void submitSucceedsWhenRedisUnavailable() throws Exception {
-        OrderServiceImpl service = fallbackService();
+        OrderCommandService service = fallbackService();
 
         Map<String, Object> single = service.submit(USER_ID, buildDto("single"));
         String singleOrderNo = String.valueOf(single.get("orderNo"));
@@ -185,8 +193,7 @@ class OrderNoRedisFallbackTest {
                 .thenAnswer(invocation -> orderMapper.insert(invocation.getArgument(0)));
         when(spyMapper.countByStatus(anyInt())).thenAnswer(invocation -> orderMapper.countByStatus(invocation.getArgument(0)));
 
-        OrderServiceImpl service = new OrderServiceImpl(
-                spyMapper, orderDetailMapper, drinkMapper, pendingOrderCounter, new RedisUtil(redisTemplate));
+        OrderCommandService service = commandService(spyMapper, new RedisUtil(redisTemplate));
 
         Map<String, Object> result = service.submit(USER_ID, buildDto("retryOnce"));
         String orderNo = String.valueOf(result.get("orderNo"));
@@ -207,8 +214,7 @@ class OrderNoRedisFallbackTest {
         when(spyMapper.insert(any(Order.class))).thenThrow(new DuplicateKeyException("simulated dup"));
         when(spyMapper.countByStatus(anyInt())).thenReturn(0L);
 
-        OrderServiceImpl service = new OrderServiceImpl(
-                spyMapper, orderDetailMapper, drinkMapper, pendingOrderCounter, new RedisUtil(redisTemplate));
+        OrderCommandService service = commandService(spyMapper, new RedisUtil(redisTemplate));
 
         BusinessException ex = assertThrows(BusinessException.class, () -> service.submit(USER_ID, buildDto("retryTwice")));
         System.out.println("T1 二次冲突结果: message=" + ex.getMessage());
@@ -220,8 +226,7 @@ class OrderNoRedisFallbackTest {
      */
     @Test
     void normalPathRtForComparison() {
-        OrderServiceImpl service = new OrderServiceImpl(
-                orderMapper, orderDetailMapper, drinkMapper, pendingOrderCounter, new RedisUtil(redisTemplate));
+        OrderCommandService service = commandService(orderMapper, new RedisUtil(redisTemplate));
 
         service.submit(USER_ID, buildDto("rtWarmup"));
         int rounds = 20;
