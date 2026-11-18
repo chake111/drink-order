@@ -45,7 +45,7 @@ jobs:
           mysql -h 127.0.0.1 -P 3306 -uroot -p123456 drink_order_perf < deploy/mysql/init/02-order_index.sql
           mysql -h 127.0.0.1 -P 3306 -uroot -p123456 drink_order_perf < deploy/mysql/init/03-order_index_user_time.sql
       - name: mvn verify
-        run: mvn -B -f backend/pom.xml verify
+        run: mvn -B -s backend/maven-settings.xml -f backend/pom.xml verify
 
   frontend:
     name: Frontend (${{ matrix.app }})

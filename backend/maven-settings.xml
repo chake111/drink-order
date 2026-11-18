@@ -1,7 +1,7 @@
 <settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
           xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
           xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0 https://maven.apache.org/xsd/settings-1.0.0.xsd">
-    <!-- 容器内构建用的镜像源；CI 直接跑 mvn 不受影响 -->
+    <!-- 容器与 CI 构建用的镜像源；本地直接跑 mvn 不受影响 -->
     <mirrors>
         <mirror>
             <id>aliyunmaven</id>
