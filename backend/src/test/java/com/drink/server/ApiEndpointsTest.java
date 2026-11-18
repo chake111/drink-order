@@ -542,9 +542,15 @@ class ApiEndpointsTest {
 
     @Test
     void userCancelGuards() throws Exception {
+        // 不依赖库里已有“别人的待接单订单”：种子里 4 条待接单全属于当前测试用户，干净库会查空
+        Long otherUserId = jdbcTemplate.queryForObject(
+                "SELECT id FROM user WHERE openid <> ? LIMIT 1", Long.class, USER_OPENID);
+        String fixtureOrderNo = "UT" + System.nanoTime();
+        jdbcTemplate.update("INSERT INTO `order` (user_id, order_no, amount, status, pickup_type, pickup_no) "
+                        + "VALUES (?, ?, ?, 1, '自取', 'T01')",
+                otherUserId, fixtureOrderNo, new java.math.BigDecimal("1.00"));
         Long notMine = jdbcTemplate.queryForObject(
-                "SELECT id FROM `order` WHERE status = 1 AND user_id <> "
-                        + "(SELECT id FROM user WHERE openid = '" + USER_OPENID + "') LIMIT 1", Long.class);
+                "SELECT id FROM `order` WHERE order_no = ?", Long.class, fixtureOrderNo);
         JsonNode denied = json(post("/api/user/order/cancel/" + notMine)
                 .header("Authorization", bearer(userToken)));
         assertEquals("无权操作此订单", denied.path("msg").asText());
